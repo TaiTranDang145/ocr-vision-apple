@@ -33,6 +33,47 @@ func render(_ page: PDFPage) throws -> CGImage {
     return image
 }
 
+private final class EmbeddedImageCandidate {
+    var image: CGImage?
+    var pixels = 0
+}
+
+private let collectEmbeddedImage: CGPDFDictionaryApplierFunction = { _, object, info in
+    guard let info else { return }
+    var stream: CGPDFStreamRef?
+    guard CGPDFObjectGetValue(object, .stream, &stream), let stream else { return }
+    guard let dictionary = CGPDFStreamGetDictionary(stream) else { return }
+    var subtype: UnsafePointer<CChar>?
+    guard CGPDFDictionaryGetName(dictionary, "Subtype", &subtype),
+          subtype.map({ String(cString: $0) }) == "Image" else { return }
+    var width: CGPDFInteger = 0, height: CGPDFInteger = 0
+    guard CGPDFDictionaryGetInteger(dictionary, "Width", &width),
+          CGPDFDictionaryGetInteger(dictionary, "Height", &height) else { return }
+    var format: CGPDFDataFormat = .raw
+    guard let data = CGPDFStreamCopyData(stream, &format),
+          let image = NSImage(data: data as Data)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+    let candidate = Unmanaged<EmbeddedImageCandidate>.fromOpaque(info).takeUnretainedValue()
+    let pixels = width * height
+    if pixels > candidate.pixels {
+        candidate.image = image
+        candidate.pixels = pixels
+    }
+}
+
+func embeddedImage(_ page: PDFPage) -> CGImage? {
+    guard let pageRef = page.pageRef, let pageDictionary = pageRef.dictionary else { return nil }
+    var resources: CGPDFDictionaryRef?
+    var objects: CGPDFDictionaryRef?
+    guard CGPDFDictionaryGetDictionary(pageDictionary, "Resources", &resources),
+          let resources,
+          CGPDFDictionaryGetDictionary(resources, "XObject", &objects),
+          let objects else { return nil }
+    let candidate = EmbeddedImageCandidate()
+    CGPDFDictionaryApplyFunction(objects, collectEmbeddedImage, Unmanaged.passUnretained(candidate).toOpaque())
+    // ponytail: top-level JPEG/JPEG2000 images only; fall back to rendering for nested/raw PDF image streams.
+    return candidate.image
+}
+
 func html(_ value: String) -> String {
     value.replacingOccurrences(of: "&", with: "&amp;")
         .replacingOccurrences(of: "<", with: "&lt;")
@@ -54,12 +95,14 @@ func recognizeDocument(_ cgImage: CGImage) async throws -> String {
     var options = request.textRecognitionOptions
     options.recognitionLanguages = [Locale.Language(identifier: "vi")]
     options.useLanguageCorrection = true
+    options.minimumTextHeightFraction = 0
+    options.customWords = ["ĐLDK", "PV Power", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ"]
     request.textRecognitionOptions = options
     let observations = try await request.perform(on: imageData)
     guard let document = observations.first?.document else {
         throw NSError(domain: "OCR", code: 1, userInfo: [NSLocalizedDescriptionKey: "Vision could not recognize this page"])
     }
-    let text = ([document.title?.transcript].compactMap { $0 } + document.paragraphs.map(\.transcript)).joined(separator: "\n\n")
+    let text = document.paragraphs.map(\.transcript).joined(separator: "\n\n")
     let tables = document.tables.enumerated().map { "### Table \($0.offset + 1)\n\n" + tableHTML($0.element) }.joined(separator: "\n\n")
     return [text, tables].filter { !$0.isEmpty }.joined(separator: "\n\n")
 }
@@ -81,7 +124,7 @@ func ocrMarkdown(_ data: Data) async throws -> String {
     var pages = [String]()
     for index in 0..<document.pageCount {
         guard let page = document.page(at: index) else { throw NSError(domain: "OCR", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read PDF page \(index + 1)"]) }
-        pages.append(try await recognizeDocument(render(page)))
+        pages.append(try await recognizeDocument(embeddedImage(page) ?? render(page)))
     }
     return markdown(pages)
 }
@@ -149,6 +192,7 @@ func receiveRequest(on connection: NWConnection, buffer: Data = Data()) {
 let arguments = CommandLine.arguments
 if arguments.contains("--self-test") {
     assert(markdown(["first", "second"]).contains("## Page 2\n\nsecond"))
+    assert(html("<a&b>") == "&lt;a&amp;b&gt;")
     assert(outputFilename("hoa-don.pdf") == "hoa-don.md")
     print("ok")
     exit(0)
