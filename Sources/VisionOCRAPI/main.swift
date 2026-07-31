@@ -74,6 +74,23 @@ func embeddedImage(_ page: PDFPage) -> CGImage? {
     return candidate.image
 }
 
+func ocrScale(width: Int, height: Int) -> CGFloat {
+    let target = CGFloat(3508) / CGFloat(max(width, height))
+    let pixelLimit = sqrt(CGFloat(maxPagePixels) / CGFloat(width * height))
+    return max(1, min(2, min(target, pixelLimit)))
+}
+
+func upscaleForOCR(_ image: CGImage) -> CGImage {
+    let scale = ocrScale(width: image.width, height: image.height)
+    guard scale > 1 else { return image }
+    let width = Int((CGFloat(image.width) * scale).rounded())
+    let height = Int((CGFloat(image.height) * scale).rounded())
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage() ?? image
+}
+
 func html(_ value: String) -> String {
     value.replacingOccurrences(of: "&", with: "&amp;")
         .replacingOccurrences(of: "<", with: "&lt;")
@@ -124,7 +141,7 @@ func ocrMarkdown(_ data: Data) async throws -> String {
     var pages = [String]()
     for index in 0..<document.pageCount {
         guard let page = document.page(at: index) else { throw NSError(domain: "OCR", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read PDF page \(index + 1)"]) }
-        pages.append(try await recognizeDocument(embeddedImage(page) ?? render(page)))
+        pages.append(try await recognizeDocument(embeddedImage(page).map(upscaleForOCR) ?? render(page)))
     }
     return markdown(pages)
 }
@@ -191,6 +208,8 @@ func receiveRequest(on connection: NWConnection, buffer: Data = Data()) {
 
 let arguments = CommandLine.arguments
 if arguments.contains("--self-test") {
+    assert(ocrScale(width: 1238, height: 1752) == 2)
+    assert(ocrScale(width: 3000, height: 4000) == 1)
     assert(markdown(["first", "second"]).contains("## Page 2\n\nsecond"))
     assert(html("<a&b>") == "&lt;a&amp;b&gt;")
     assert(outputFilename("hoa-don.pdf") == "hoa-don.md")
