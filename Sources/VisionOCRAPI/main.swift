@@ -101,7 +101,10 @@ func html(_ value: String) -> String {
 }
 
 func tableHTML(_ table: DocumentObservation.Container.Table) -> String {
-    "<table>\n" + table.rows.map { row in
+    let rows = table.rows.filter { row in
+        row.contains { !$0.content.text.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+    return "<table>\n" + rows.map { row in
         "  <tr>" + row.map { "<td>\(html($0.content.text.transcript))</td>" }.joined() + "</tr>"
     }.joined(separator: "\n") + "\n</table>"
 }
@@ -115,15 +118,21 @@ func recognizeDocument(_ cgImage: CGImage) async throws -> String {
     options.recognitionLanguages = [Locale.Language(identifier: "vi")]
     options.useLanguageCorrection = true
     options.minimumTextHeightFraction = 0
-    options.customWords = ["ĐLDK", "PV Power", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ"]
+    options.customWords = [
+        "ĐLDK", "PV Power", "PVPOWER", "QĐ-ĐLDK", "CTCP", "HĐQT", "TCT",
+        "BDSC", "QLHN", "ATSKMT", "HSTLDA", "PCCC", "CNCH", "TCHC", "TCNS",
+        "TCKT", "ĐHĐCĐ", "NĐ-CP", "QH13", "QH14", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ"
+    ]
     request.textRecognitionOptions = options
     let observations = try await request.perform(on: imageData)
     guard let document = observations.first?.document else {
         throw NSError(domain: "OCR", code: 1, userInfo: [NSLocalizedDescriptionKey: "Vision could not recognize this page"])
     }
+    let confidence = observations.first?.confidence ?? 0
+    let quality = String(format: "<!-- Vision OCR confidence: %.2f%@ -->", confidence, confidence < 0.7 ? "; review recommended" : "")
     let text = document.paragraphs.map(\.transcript).joined(separator: "\n\n")
     let tables = document.tables.enumerated().map { "### Table \($0.offset + 1)\n\n" + tableHTML($0.element) }.joined(separator: "\n\n")
-    return [text, tables].filter { !$0.isEmpty }.joined(separator: "\n\n")
+    return [quality, text, tables].filter { !$0.isEmpty }.joined(separator: "\n\n")
 }
 
 func markdown(_ pages: [String]) -> String {
