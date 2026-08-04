@@ -36,6 +36,7 @@ func render(_ page: PDFPage) throws -> CGImage {
 private final class EmbeddedImageCandidate {
     var image: CGImage?
     var pixels = 0
+    var count = 0
 }
 
 private let collectEmbeddedImage: CGPDFDictionaryApplierFunction = { _, object, info in
@@ -46,13 +47,14 @@ private let collectEmbeddedImage: CGPDFDictionaryApplierFunction = { _, object, 
     var subtype: UnsafePointer<CChar>?
     guard CGPDFDictionaryGetName(dictionary, "Subtype", &subtype),
           subtype.map({ String(cString: $0) }) == "Image" else { return }
+    let candidate = Unmanaged<EmbeddedImageCandidate>.fromOpaque(info).takeUnretainedValue()
+    candidate.count += 1
     var width: CGPDFInteger = 0, height: CGPDFInteger = 0
     guard CGPDFDictionaryGetInteger(dictionary, "Width", &width),
           CGPDFDictionaryGetInteger(dictionary, "Height", &height) else { return }
     var format: CGPDFDataFormat = .raw
     guard let data = CGPDFStreamCopyData(stream, &format),
           let image = NSImage(data: data as Data)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-    let candidate = Unmanaged<EmbeddedImageCandidate>.fromOpaque(info).takeUnretainedValue()
     let pixels = width * height
     if pixels > candidate.pixels {
         candidate.image = image
@@ -70,8 +72,8 @@ func embeddedImage(_ page: PDFPage) -> CGImage? {
           let objects else { return nil }
     let candidate = EmbeddedImageCandidate()
     CGPDFDictionaryApplyFunction(objects, collectEmbeddedImage, Unmanaged.passUnretained(candidate).toOpaque())
-    // ponytail: top-level JPEG/JPEG2000 images only; fall back to rendering for nested/raw PDF image streams.
-    return candidate.image
+    // Multi-image/MRC pages need PDFKit to compose their background, foreground, and masks.
+    return candidate.count == 1 ? candidate.image : nil
 }
 
 func ocrScale(width: Int, height: Int) -> CGFloat {
