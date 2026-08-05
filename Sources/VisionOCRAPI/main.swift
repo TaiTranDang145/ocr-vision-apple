@@ -79,7 +79,7 @@ func embeddedImage(_ page: PDFPage) -> CGImage? {
 func ocrScale(width: Int, height: Int) -> CGFloat {
     let target = CGFloat(3508) / CGFloat(max(width, height))
     let pixelLimit = sqrt(CGFloat(maxPagePixels) / CGFloat(width * height))
-    return max(1, min(2, min(target, pixelLimit)))
+    return max(1, min(3, min(target, pixelLimit)))
 }
 
 func upscaleForOCR(_ image: CGImage) -> CGImage {
@@ -115,24 +115,28 @@ func recognizeDocument(_ cgImage: CGImage) async throws -> String {
     }
     var request = RecognizeDocumentsRequest()
     var options = request.textRecognitionOptions
-    options.recognitionLanguages = [Locale.Language(identifier: "vi")]
+    options.recognitionLanguages = [
+        Locale.Language(identifier: "vi"),
+        Locale.Language(identifier: "en")
+    ]
     options.useLanguageCorrection = true
     options.minimumTextHeightFraction = 0
     options.customWords = [
         "ĐLDK", "PV Power", "PVPOWER", "QĐ-ĐLDK", "CTCP", "HĐQT", "TCT",
         "BDSC", "QLHN", "ATSKMT", "HSTLDA", "PCCC", "CNCH", "TCHC", "TCNS",
-        "TCKT", "ĐHĐCĐ", "NĐ-CP", "QH13", "QH14", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ"
+        "TCKT", "ĐHĐCĐ", "NĐ-CP", "QH13", "QH14", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ",
+        "Tổng công ty", "Dầu khí", "Điện lực", "Việt Nam", "Cổ phần", "Tổ chức",
+        "Quyết định", "Quy chế", "Quy định", "Tổng giám đốc", "Hội đồng quản trị",
+        "Đại hội đồng cổ đông", "Ban kiểm soát"
     ]
     request.textRecognitionOptions = options
     let observations = try await request.perform(on: imageData)
     guard let document = observations.first?.document else {
         throw NSError(domain: "OCR", code: 1, userInfo: [NSLocalizedDescriptionKey: "Vision could not recognize this page"])
     }
-    let confidence = observations.first?.confidence ?? 0
-    let quality = String(format: "<!-- Vision OCR confidence: %.2f%@ -->", confidence, confidence < 0.7 ? "; review recommended" : "")
     let text = document.paragraphs.map(\.transcript).joined(separator: "\n\n")
     let tables = document.tables.enumerated().map { "### Table \($0.offset + 1)\n\n" + tableHTML($0.element) }.joined(separator: "\n\n")
-    return [quality, text, tables].filter { !$0.isEmpty }.joined(separator: "\n\n")
+    return [text, tables].filter { !$0.isEmpty }.joined(separator: "\n\n")
 }
 
 func markdown(_ pages: [String]) -> String {
@@ -220,6 +224,7 @@ func receiveRequest(on connection: NWConnection, buffer: Data = Data()) {
 let arguments = CommandLine.arguments
 if arguments.contains("--self-test") {
     assert(ocrScale(width: 1238, height: 1752) == 2)
+    assert(ocrScale(width: 822, height: 1172) > 2.9)
     assert(ocrScale(width: 3000, height: 4000) == 1)
     assert(markdown(["first", "second"]).contains("## Page 2\n\nsecond"))
     assert(html("<a&b>") == "&lt;a&amp;b&gt;")
