@@ -115,19 +115,13 @@ func recognizeDocument(_ cgImage: CGImage) async throws -> String {
     }
     var request = RecognizeDocumentsRequest()
     var options = request.textRecognitionOptions
-    options.recognitionLanguages = [
-        Locale.Language(identifier: "vi"),
-        Locale.Language(identifier: "en")
-    ]
+    options.recognitionLanguages = [Locale.Language(identifier: "vi")]
     options.useLanguageCorrection = true
     options.minimumTextHeightFraction = 0
     options.customWords = [
         "ĐLDK", "PV Power", "PVPOWER", "QĐ-ĐLDK", "CTCP", "HĐQT", "TCT",
         "BDSC", "QLHN", "ATSKMT", "HSTLDA", "PCCC", "CNCH", "TCHC", "TCNS",
-        "TCKT", "ĐHĐCĐ", "NĐ-CP", "QH13", "QH14", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ",
-        "Tổng công ty", "Dầu khí", "Điện lực", "Việt Nam", "Cổ phần", "Tổ chức",
-        "Quyết định", "Quy chế", "Quy định", "Tổng giám đốc", "Hội đồng quản trị",
-        "Đại hội đồng cổ đông", "Ban kiểm soát"
+        "TCKT", "ĐHĐCĐ", "NĐ-CP", "QH13", "QH14", "SXKD", "QLKH", "QLTH", "TLBQ", "LĐBQ"
     ]
     request.textRecognitionOptions = options
     let observations = try await request.perform(on: imageData)
